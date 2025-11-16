@@ -48,11 +48,11 @@ export class GameOrchestrator {
   /**
    * Register an agent (LLM or human)
    */
-  registerAgent(name: string, type: AgentType, systemPrompt?: string) {
+  registerAgent(name: string, type: AgentType, systemPrompt?: string, model?: string) {
     const agent: Agent = {
       name,
       type,
-      instance: type === 'llm' ? new IsolatedAgent(name, systemPrompt || '') : null
+      instance: type === 'llm' ? new IsolatedAgent(name, systemPrompt || '', model || 'gemini-2.5-flash') : null
     };
     this.agents.set(name, agent);
   }

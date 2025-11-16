@@ -57,15 +57,24 @@ export class MurderMysteryOrchestrator extends GameOrchestrator {
 
   /**
    * Initialize game with players
+   * @param playerNames - Array of player names
+   * @param humanPlayerName - Optional name of human player
+   * @param agentConfigs - Optional map of agent name to configuration (model, etc.)
    */
-  setupGame(playerNames: string[], humanPlayerName?: string) {
+  setupGame(
+    playerNames: string[],
+    humanPlayerName?: string,
+    agentConfigs?: Map<string, { model?: string }>
+  ) {
     // Register all agents
     playerNames.forEach(name => {
       const isHuman = name === humanPlayerName;
+      const config = agentConfigs?.get(name);
       this.registerAgent(
         name,
         isHuman ? 'human' : 'llm',
-        '' // System prompt will be set after role assignment
+        '', // System prompt will be set after role assignment
+        config?.model
       );
     });
 

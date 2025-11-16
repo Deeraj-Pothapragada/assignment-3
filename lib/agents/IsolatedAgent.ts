@@ -13,11 +13,13 @@ import { geminiGenerate } from '../gemini';
 export class IsolatedAgent {
   name: string;
   systemPrompt: string;
+  model: string;
   conversationHistory: any[]; // Array of Gemini message format
 
-  constructor(name: string, systemPrompt: string) {
+  constructor(name: string, systemPrompt: string, model: string = 'gemini-2.5-flash') {
     this.name = name;
     this.systemPrompt = systemPrompt;
+    this.model = model;
     this.conversationHistory = [];
   }
 
@@ -60,6 +62,7 @@ export class IsolatedAgent {
       const result = await geminiGenerate({
         contents: [...this.conversationHistory, instructionMessage],
         systemPrompt: this.systemPrompt,
+        model: this.model,
         config: {
           responseMimeType: 'application/json',
           responseSchema: RESPONSE_SCHEMA
@@ -79,7 +82,8 @@ export class IsolatedAgent {
       // Regular text response
       const result = await geminiGenerate({
         contents: [...this.conversationHistory, instructionMessage],
-        systemPrompt: this.systemPrompt
+        systemPrompt: this.systemPrompt,
+        model: this.model
       });
       text = result.text;
     }
