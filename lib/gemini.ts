@@ -7,10 +7,12 @@ export function hasGemini(overrideKey?: string): boolean {
 export async function geminiGenerate({
   contents,
   systemPrompt = '',
+  model = 'gemini-2.5-flash',
   config = {}
 }: {
   contents: any[];
   systemPrompt?: string;
+  model?: string;
   config?: any;
 }) {
   const key = process.env.GEMINI_API_KEY;
@@ -22,7 +24,7 @@ export async function geminiGenerate({
   }
 
   const request = {
-    model: 'gemini-2.5-flash',
+    model: model,
     contents: contents,
     config: config
   };

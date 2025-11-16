@@ -1,5 +1,6 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { MurderMysteryOrchestrator } from '@/lib/orchestrators/MurderMysteryOrchestrator';
+import { setGameInstanceGetter } from './murder-mystery-discussion/route';
 
 /**
  * Murder Mystery Game API
@@ -9,6 +10,10 @@ import { MurderMysteryOrchestrator } from '@/lib/orchestrators/MurderMysteryOrch
 
 // Store game instance in memory (persists in dev mode)
 let gameInstance: MurderMysteryOrchestrator | null = null;
+let humanPlayerName: string | undefined = undefined;
+
+// Export getter for discussion API
+setGameInstanceGetter(() => gameInstance);
 
 export async function POST(req: NextRequest) {
   try {
@@ -17,10 +22,20 @@ export async function POST(req: NextRequest) {
 
     // Initialize new game
     if (action === 'init') {
-      const { playerNames, humanPlayerName } = body;
+      const { playerNames, humanPlayerName, agentConfigs } = body;
+
+      // Convert agentConfigs object to Map if provided
+      let agentConfigMap: Map<string, { model?: string }> | undefined;
+      if (agentConfigs) {
+        agentConfigMap = new Map();
+        Object.entries(agentConfigs).forEach(([name, config]: [string, any]) => {
+          agentConfigMap!.set(name, { model: config.model });
+        });
+      }
 
       gameInstance = new MurderMysteryOrchestrator();
-      gameInstance.setupGame(playerNames, humanPlayerName);
+      humanPlayerName = body.humanPlayerName;
+      gameInstance.setupGame(playerNames, humanPlayerName, agentConfigMap);
 
       // Send private role assignments to all players without requiring introductions
       const roleAssignments = gameInstance.getAgentNames().map(name => ({
@@ -149,8 +164,8 @@ export async function POST(req: NextRequest) {
       // Check win condition
       const winCheck = gameInstance!.checkWinCondition();
 
-      // Check if human player (Finn) died - game over for them
-      const humanPlayerDied = result.deaths.includes('Finn');
+      // Check if human player died - game over for them
+      const humanPlayerDied = humanPlayerName ? result.deaths.includes(humanPlayerName) : false;
 
       return NextResponse.json({
         phase,
@@ -175,43 +190,57 @@ export async function POST(req: NextRequest) {
       });
     }
 
-    // Day discussion phase
-    if (phase?.includes('_discussion')) {
-      const humanResponseMap = new Map(Object.entries(humanResponses || {}) as [string, string][]);
+    // Day discussion phase - just start the discussion, don't collect all statements
+    if (phase?.includes('_discussion') && action === 'start_discussion') {
       const aliveAgents = gameInstance.gameState.alive;
 
-      // Each alive player makes a statement
-      const statementPrompts = aliveAgents.map(name => ({
-        agentName: name,
-        message: `DAY DISCUSSION: Make a public statement to the group. You can share what you saw last night, make accusations, or say anything you want. Remember: others may lie!`
-      }));
-
-      const statements = await gameInstance!.promptAgents(
-        statementPrompts,
-        humanResponseMap,
-        true
-      );
-
-      // IMPORTANT: Broadcast all public statements to all agents so they can use this info for voting
-      const publicStatements = statements
-        .map(s => `${s.agentName}: "${s.response}"`)
-        .join('\n');
-
+      // Notify all agents that discussion has started
       aliveAgents.forEach(agentName => {
         gameInstance!.notifyAgent(
           agentName,
-          `📢 PUBLIC STATEMENTS FROM EVERYONE:\n${publicStatements}`
+          `📢 DAY DISCUSSION PHASE: You have 90 seconds to discuss. Share what you saw, make accusations, ask questions, or say anything you want. Remember: others may lie!`
         );
       });
 
+      // Optionally, have LLM agents make an initial statement
+      const llmAgents = aliveAgents.filter(name => {
+        const agent = gameInstance!.agents.get(name);
+        return agent?.type === 'llm';
+      });
+
+      // Let LLM agents make initial statements
+      const initialPrompts = llmAgents.map(name => ({
+        agentName: name,
+        message: `DISCUSSION STARTED: Make an initial statement to the group. Share what you saw last night, make accusations, or say anything you want.`
+      }));
+
+      const initialStatements = await Promise.all(
+        initialPrompts.map(async ({ agentName, message }) => {
+          try {
+            const response = await gameInstance!.promptAgent(agentName, message, false);
+            const messageText = `${agentName}: "${response.response}"`;
+
+            // Broadcast to all agents
+            aliveAgents.forEach(name => {
+              gameInstance!.notifyAgent(name, `📢 DISCUSSION: ${messageText}`);
+            });
+
+            return {
+              agent: agentName,
+              statement: response.response
+            };
+          } catch (error) {
+            console.error(`Error getting initial statement from ${agentName}:`, error);
+            return null;
+          }
+        })
+      );
+
       return NextResponse.json({
         phase,
-        discussionPrompts: statementPrompts.map(p => ({ agent: p.agentName, prompt: p.message })),
-        statements: statements.map(s => ({
-          agent: s.agentName,
-          statement: s.response,
-          reasoning: s.reasoning
-        })),
+        discussionStarted: true,
+        duration: 90, // seconds
+        initialStatements: initialStatements.filter(s => s !== null),
         nextPhase: phase.replace('_discussion', '_voting')
       });
     }
@@ -291,5 +320,6 @@ export async function POST(req: NextRequest) {
 // Reset game
 export async function DELETE() {
   gameInstance = null;
+  humanPlayerName = undefined;
   return NextResponse.json({ success: true, message: 'Game reset' });
 }
